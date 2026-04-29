@@ -1,0 +1,500 @@
+################################################################################
+# RayJob for Multi-Node Distributed SFT Training
+################################################################################
+# Uses Ray Train for distributed PyTorch with FSDP HYBRID_SHARD strategy
+# - Head node: Coordinator only (no GPU)
+# - Worker nodes: GPU training with FSDP
+# - Auto-scales to zero after job completion
+################################################################################
+apiVersion: ray.io/v1
+kind: RayJob
+metadata:
+  name: sft-training-ray
+  namespace: ml-training
+  labels:
+    app: ray-training
+    workload: gpu-training
+spec:
+  # Entry point - runs on Ray head
+  entrypoint: python /app/train_ray.py
+
+  # Shutdown cluster after job finishes (scale to zero)
+  # Required by Kueue for managed jobs. Works with ttlSecondsAfterFinished
+  # to provide complete lifecycle cleanup.
+  shutdownAfterJobFinishes: true
+
+  # Delete RayJob (and cascade-delete RayCluster) after completion.
+  ttlSecondsAfterFinished: 120
+
+  # Suspend job (set to true to pause, false to run)
+  suspend: false
+
+  # Submitter pod template - lightweight Ray image (only needs ray CLI)
+  submitterPodTemplate:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: ray-training-sa
+      containers:
+        - name: ray-job-submitter
+          image: rayproject/ray:2.53.0-py310
+
+  # RayCluster specification
+  rayClusterSpec:
+    rayVersion: '2.53.0'
+
+    # =========================================================================
+    # Head Node (Coordinator - no GPU needed)
+    # =========================================================================
+    headGroupSpec:
+      rayStartParams:
+        dashboard-host: '0.0.0.0'
+        num-gpus: '0'  # Head doesn't need GPU for training
+
+      template:
+        metadata:
+          annotations:
+            karpenter.sh/do-not-disrupt: "true"
+          labels:
+            app: ray-training
+            ray-node-type: head
+        spec:
+          # Service account for S3 access via IRSA
+          serviceAccountName: ray-training-sa
+
+          # Run on default node pool (not GPU nodes)
+          # Force on-demand to prevent Spot interruptions killing the Ray head
+          nodeSelector:
+            kubernetes.io/os: linux
+            karpenter.sh/capacity-type: on-demand
+
+          containers:
+            - name: ray-head
+              image: pytorch-training:latest  # Replace with your ECR image
+              imagePullPolicy: Always
+
+              ports:
+                - containerPort: 6379
+                  name: gcs-server
+                - containerPort: 8265
+                  name: dashboard
+                - containerPort: 10001
+                  name: client
+
+              resources:
+                requests:
+                  cpu: "2"
+                  memory: "4Gi"
+                limits:
+                  cpu: "4"
+                  memory: "8Gi"
+
+              env:
+                # Ray settings
+                - name: RAY_DISABLE_DOCKER_CPU_WARNING
+                  value: "1"
+                # HuggingFace token (optional - for gated models)
+                - name: HF_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: hf-token
+                      key: token
+                      optional: true
+                # Training configuration (from ConfigMap)
+                - name: MODEL_NAME
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ray-training-config
+                      key: model_name
+                - name: DATASET_NAME
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ray-training-config
+                      key: dataset_name
+                - name: USE_QLORA
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ray-training-config
+                      key: use_qlora
+                - name: USE_FSDP
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ray-training-config
+                      key: use_fsdp
+                - name: USE_DDP
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ray-training-config
+                      key: use_ddp
+                - name: BATCH_SIZE
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ray-training-config
+                      key: batch_size
+                - name: GRADIENT_ACCUMULATION_STEPS
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ray-training-config
+                      key: gradient_accumulation_steps
+                - name: LEARNING_RATE
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ray-training-config
+                      key: learning_rate
+                - name: NUM_EPOCHS
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ray-training-config
+                      key: num_epochs
+                - name: MAX_SEQ_LENGTH
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ray-training-config
+                      key: max_seq_length
+                - name: LORA_R
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ray-training-config
+                      key: lora_r
+                - name: MAX_SAMPLES
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ray-training-config
+                      key: max_samples
+                - name: NUM_WORKERS
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ray-training-config
+                      key: num_workers
+                - name: GPUS_PER_WORKER
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ray-training-config
+                      key: gpus_per_worker
+                - name: CPUS_PER_WORKER
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ray-training-config
+                      key: cpus_per_worker
+                - name: LORA_ALPHA
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ray-training-config
+                      key: lora_alpha
+                - name: LORA_DROPOUT
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ray-training-config
+                      key: lora_dropout
+                - name: ATTN_IMPLEMENTATION
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ray-training-config
+                      key: attn_implementation
+                # Hugging Face cache (shared via EFS)
+                - name: HF_HOME
+                  value: "/data/huggingface"
+                - name: TRANSFORMERS_CACHE
+                  value: "/data/huggingface/hub"
+                # S3 Configuration (from s3-config ConfigMap)
+                - name: S3_BUCKET
+                  valueFrom:
+                    configMapKeyRef:
+                      name: s3-config
+                      key: bucket_name
+                      optional: true
+                - name: RAY_STORAGE_PATH
+                  valueFrom:
+                    configMapKeyRef:
+                      name: s3-config
+                      key: ray_storage_path
+                      optional: true
+                - name: OUTPUT_PATH
+                  valueFrom:
+                    configMapKeyRef:
+                      name: s3-config
+                      key: output_path
+                      optional: true
+                - name: CHECKPOINT_FREQUENCY
+                  valueFrom:
+                    configMapKeyRef:
+                      name: s3-config
+                      key: checkpoint_frequency
+                      optional: true
+                - name: NUM_CHECKPOINTS_TO_KEEP
+                  valueFrom:
+                    configMapKeyRef:
+                      name: s3-config
+                      key: num_checkpoints_to_keep
+                      optional: true
+                # Fallback output directory (local, used if S3 not configured)
+                - name: OUTPUT_DIR
+                  value: "/data/outputs"
+
+              volumeMounts:
+                - name: shared-data
+                  mountPath: /data
+
+          volumes:
+            - name: shared-data
+              persistentVolumeClaim:
+                claimName: ml-data-efs
+
+    # =========================================================================
+    # Worker Nodes (GPU Training)
+    # =========================================================================
+    workerGroupSpecs:
+      - groupName: gpu-workers
+        replicas: 2           # Number of GPU nodes
+        minReplicas: 2
+        maxReplicas: 4        # For autoscaling
+
+        rayStartParams:
+          num-gpus: '4'       # GPUs per worker (g5.12xlarge has 4)
+
+        template:
+          metadata:
+            labels:
+              app: ray-training
+              ray-node-type: worker
+              workload: gpu-training
+          spec:
+            # Tolerate GPU node taint
+            tolerations:
+              - key: "nvidia.com/gpu"
+                operator: "Exists"
+                effect: "NoSchedule"
+
+            # Use on-demand instances for benchmarking stability
+            # Force gpu-training nodepool to avoid default nodepool conflicts
+            nodeSelector:
+              karpenter.sh/capacity-type: on-demand
+              karpenter.sh/nodepool: gpu-training
+
+            # Service account for S3 access via IRSA
+            serviceAccountName: ray-training-sa
+
+            containers:
+              - name: ray-worker
+                image: pytorch-training:latest  # Replace with your ECR image
+                imagePullPolicy: Always
+
+                lifecycle:
+                  preStop:
+                    exec:
+                      command: ["/bin/sh", "-c", "ray stop"]
+
+                resources:
+                  requests:
+                    cpu: "16"
+                    memory: "64Gi"
+                    nvidia.com/gpu: "4"
+                  limits:
+                    cpu: "48"
+                    memory: "180Gi"
+                    nvidia.com/gpu: "4"
+
+                env:
+                  # HuggingFace token (optional - for gated models)
+                  - name: HF_TOKEN
+                    valueFrom:
+                      secretKeyRef:
+                        name: hf-token
+                        key: token
+                        optional: true
+                  # Training configuration (from ConfigMap)
+                  - name: MODEL_NAME
+                    valueFrom:
+                      configMapKeyRef:
+                        name: ray-training-config
+                        key: model_name
+                  - name: DATASET_NAME
+                    valueFrom:
+                      configMapKeyRef:
+                        name: ray-training-config
+                        key: dataset_name
+                  - name: USE_QLORA
+                    valueFrom:
+                      configMapKeyRef:
+                        name: ray-training-config
+                        key: use_qlora
+                  - name: USE_FSDP
+                    valueFrom:
+                      configMapKeyRef:
+                        name: ray-training-config
+                        key: use_fsdp
+                  - name: USE_DDP
+                    valueFrom:
+                      configMapKeyRef:
+                        name: ray-training-config
+                        key: use_ddp
+                  - name: BATCH_SIZE
+                    valueFrom:
+                      configMapKeyRef:
+                        name: ray-training-config
+                        key: batch_size
+                  - name: GRADIENT_ACCUMULATION_STEPS
+                    valueFrom:
+                      configMapKeyRef:
+                        name: ray-training-config
+                        key: gradient_accumulation_steps
+                  - name: LEARNING_RATE
+                    valueFrom:
+                      configMapKeyRef:
+                        name: ray-training-config
+                        key: learning_rate
+                  - name: NUM_EPOCHS
+                    valueFrom:
+                      configMapKeyRef:
+                        name: ray-training-config
+                        key: num_epochs
+                  - name: MAX_SEQ_LENGTH
+                    valueFrom:
+                      configMapKeyRef:
+                        name: ray-training-config
+                        key: max_seq_length
+                  - name: LORA_R
+                    valueFrom:
+                      configMapKeyRef:
+                        name: ray-training-config
+                        key: lora_r
+                  - name: MAX_SAMPLES
+                    valueFrom:
+                      configMapKeyRef:
+                        name: ray-training-config
+                        key: max_samples
+                  - name: NUM_WORKERS
+                    valueFrom:
+                      configMapKeyRef:
+                        name: ray-training-config
+                        key: num_workers
+                  - name: GPUS_PER_WORKER
+                    valueFrom:
+                      configMapKeyRef:
+                        name: ray-training-config
+                        key: gpus_per_worker
+                  - name: CPUS_PER_WORKER
+                    valueFrom:
+                      configMapKeyRef:
+                        name: ray-training-config
+                        key: cpus_per_worker
+                  - name: LORA_ALPHA
+                    valueFrom:
+                      configMapKeyRef:
+                        name: ray-training-config
+                        key: lora_alpha
+                  - name: LORA_DROPOUT
+                    valueFrom:
+                      configMapKeyRef:
+                        name: ray-training-config
+                        key: lora_dropout
+                  - name: ATTN_IMPLEMENTATION
+                    valueFrom:
+                      configMapKeyRef:
+                        name: ray-training-config
+                        key: attn_implementation
+                  # Disable safetensors mmap to prevent SIGBUS on EFS
+                  - name: SAFETENSORS_FAST_GPU
+                    value: "0"
+
+                  # NCCL settings for multi-node
+                  - name: NCCL_DEBUG
+                    value: "WARN"
+                  - name: NCCL_IB_DISABLE
+                    value: "1"
+
+                  # Hugging Face cache (shared via EFS)
+                  - name: HF_HOME
+                    value: "/data/huggingface"
+                  - name: TRANSFORMERS_CACHE
+                    value: "/data/huggingface/hub"
+
+                  # S3 Configuration (from s3-config ConfigMap)
+                  - name: S3_BUCKET
+                    valueFrom:
+                      configMapKeyRef:
+                        name: s3-config
+                        key: bucket_name
+                        optional: true
+                  - name: RAY_STORAGE_PATH
+                    valueFrom:
+                      configMapKeyRef:
+                        name: s3-config
+                        key: ray_storage_path
+                        optional: true
+                  - name: OUTPUT_PATH
+                    valueFrom:
+                      configMapKeyRef:
+                        name: s3-config
+                        key: output_path
+                        optional: true
+                  - name: CHECKPOINT_FREQUENCY
+                    valueFrom:
+                      configMapKeyRef:
+                        name: s3-config
+                        key: checkpoint_frequency
+                        optional: true
+                  - name: NUM_CHECKPOINTS_TO_KEEP
+                    valueFrom:
+                      configMapKeyRef:
+                        name: s3-config
+                        key: num_checkpoints_to_keep
+                        optional: true
+                  # Fallback output directory (local, used if S3 not configured)
+                  - name: OUTPUT_DIR
+                    value: "/data/outputs"
+
+                volumeMounts:
+                  - name: shared-data
+                    mountPath: /data
+                  - name: shm
+                    mountPath: /dev/shm
+
+            volumes:
+              - name: shared-data
+                persistentVolumeClaim:
+                  claimName: ml-data-efs
+              # Shared memory for PyTorch DataLoader and NCCL
+              - name: shm
+                emptyDir:
+                  medium: Memory
+                  sizeLimit: "32Gi"
+---
+################################################################################
+# ConfigMap for Ray Training Configuration
+################################################################################
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ray-training-config
+  namespace: ml-training
+data:
+  # Model (using TinyLlama for testing - no auth required)
+  model_name: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+
+  # Dataset
+  dataset_name: "tatsu-lab/alpaca"
+  max_samples: "0"  # 0 = use all samples
+
+  # LoRA settings
+  use_qlora: "false"
+  lora_r: "16"
+  lora_alpha: "32"
+  lora_dropout: "0.05"
+
+  # Distributed training
+  use_fsdp: "true"   # Enable FSDP sharding (for large models)
+  use_ddp: "auto"    # DDP control: auto, true, false
+  # Training hyperparameters
+  batch_size: "1"
+  gradient_accumulation_steps: "16"
+  learning_rate: "1e-4"
+  num_epochs: "1"
+  max_seq_length: "2048"
+
+  # Multi-node configuration
+  num_workers: "2"        # Number of Ray Train workers
+  gpus_per_worker: "4"    # GPUs per worker
+  cpus_per_worker: "8"    # CPUs per worker
+
+  # Attention
+  attn_implementation: "auto"     # auto, eager, sdpa, flash_attention_2

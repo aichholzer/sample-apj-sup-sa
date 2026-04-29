@@ -1,0 +1,297 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sft-training
+  namespace: ml-training
+  labels:
+    app: sft-training
+    workload: gpu-training
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400  # Clean up after 24 hours
+  template:
+    metadata:
+      labels:
+        app: sft-training
+        workload: gpu-training
+    spec:
+      restartPolicy: OnFailure
+
+      # Tolerate GPU node taint
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+
+      # Schedule on GPU nodes
+      nodeSelector:
+        nvidia.com/gpu: "true"
+
+      containers:
+        - name: training
+          image: pytorch-training:latest  # Replace with your ECR image
+          imagePullPolicy: Always
+
+          # Use accelerate launch for multi-GPU training
+          command: ["accelerate", "launch"]
+          args:
+            - "--config_file=/app/configs/accelerate_default.yaml"
+            - "--num_processes=$(NUM_GPUS)"
+            - "train.py"
+
+          # Request all GPUs on the node for multi-GPU training
+          resources:
+            requests:
+              memory: "64Gi"
+              cpu: "16"
+              nvidia.com/gpu: "4"  # Request 4 GPUs for g5.12xlarge
+            limits:
+              memory: "180Gi"
+              cpu: "48"
+              nvidia.com/gpu: "4"
+
+          env:
+            # Number of GPUs (used by accelerate launch)
+            - name: NUM_GPUS
+              value: "4"
+
+            # NCCL settings for multi-GPU
+            - name: NCCL_DEBUG
+              value: "WARN"
+            - name: NCCL_IB_DISABLE
+              value: "1"
+
+            # Hugging Face cache directory
+            - name: HF_HOME
+              value: "/data/huggingface"
+            - name: TRANSFORMERS_CACHE
+              value: "/data/huggingface/hub"
+
+            # Model configuration
+            - name: MODEL_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: training-config
+                  key: model_name
+                  optional: true
+
+            # LoRA configuration
+            - name: USE_QLORA
+              valueFrom:
+                configMapKeyRef:
+                  name: training-config
+                  key: use_qlora
+                  optional: true
+            - name: LORA_R
+              valueFrom:
+                configMapKeyRef:
+                  name: training-config
+                  key: lora_r
+                  optional: true
+            - name: LORA_ALPHA
+              valueFrom:
+                configMapKeyRef:
+                  name: training-config
+                  key: lora_alpha
+                  optional: true
+            - name: LORA_DROPOUT
+              valueFrom:
+                configMapKeyRef:
+                  name: training-config
+                  key: lora_dropout
+                  optional: true
+
+            # Training configuration
+            - name: BATCH_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: training-config
+                  key: batch_size
+                  optional: true
+            - name: GRADIENT_ACCUMULATION_STEPS
+              valueFrom:
+                configMapKeyRef:
+                  name: training-config
+                  key: gradient_accumulation_steps
+                  optional: true
+            - name: LEARNING_RATE
+              valueFrom:
+                configMapKeyRef:
+                  name: training-config
+                  key: learning_rate
+                  optional: true
+            - name: NUM_EPOCHS
+              valueFrom:
+                configMapKeyRef:
+                  name: training-config
+                  key: num_epochs
+                  optional: true
+            - name: MAX_SEQ_LENGTH
+              valueFrom:
+                configMapKeyRef:
+                  name: training-config
+                  key: max_seq_length
+                  optional: true
+
+            # FSDP configuration
+            - name: USE_FSDP
+              valueFrom:
+                configMapKeyRef:
+                  name: training-config
+                  key: use_fsdp
+                  optional: true
+
+            # Dataset configuration
+            - name: DATASET_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: training-config
+                  key: dataset_name
+                  optional: true
+            - name: DATASET_CONFIG
+              valueFrom:
+                configMapKeyRef:
+                  name: training-config
+                  key: dataset_config
+                  optional: true
+            - name: MAX_SAMPLES
+              valueFrom:
+                configMapKeyRef:
+                  name: training-config
+                  key: max_samples
+                  optional: true
+
+            # Output directory
+            - name: OUTPUT_DIR
+              value: "/output"
+
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: output
+              mountPath: /output
+            - name: shm
+              mountPath: /dev/shm
+            - name: accelerate-config
+              mountPath: /app/configs
+
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: training-data
+        - name: output
+          persistentVolumeClaim:
+            claimName: training-output
+        # Shared memory for PyTorch DataLoader
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: "32Gi"
+        - name: accelerate-config
+          configMap:
+            name: accelerate-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: training-config
+  namespace: ml-training
+data:
+  # Model
+  model_name: "meta-llama/Llama-2-7b-hf"
+
+  # LoRA settings
+  use_qlora: "false"
+  lora_r: "16"
+  lora_alpha: "32"
+  lora_dropout: "0.05"
+
+  # Training hyperparameters
+  batch_size: "4"
+  gradient_accumulation_steps: "4"
+  learning_rate: "2e-4"
+  num_epochs: "3"
+  max_seq_length: "2048"
+
+  # FSDP (set to "true" for large models)
+  use_fsdp: "false"
+
+  # Dataset
+  dataset_name: "tatsu-lab/alpaca"
+  dataset_config: ""
+  max_samples: "0"  # 0 = use all samples
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: accelerate-config
+  namespace: ml-training
+data:
+  accelerate_default.yaml: |
+    compute_environment: LOCAL_MACHINE
+    debug: false
+    distributed_type: MULTI_GPU
+    downcast_bf16: 'no'
+    enable_cpu_affinity: false
+    gpu_ids: all
+    machine_rank: 0
+    main_training_function: main
+    mixed_precision: bf16
+    num_machines: 1
+    num_processes: 4
+    rdzv_backend: static
+    same_network: true
+    use_cpu: false
+
+  accelerate_fsdp.yaml: |
+    compute_environment: LOCAL_MACHINE
+    debug: false
+    distributed_type: FSDP
+    downcast_bf16: 'no'
+    enable_cpu_affinity: false
+    fsdp_config:
+      fsdp_sharding_strategy: FULL_SHARD
+      fsdp_offload_params: false
+      fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
+      fsdp_transformer_layer_cls_to_wrap: LlamaDecoderLayer,MistralDecoderLayer,Qwen2DecoderLayer
+      fsdp_backward_prefetch: BACKWARD_PRE
+      fsdp_state_dict_type: SHARDED_STATE_DICT
+      fsdp_use_orig_params: true
+      fsdp_sync_module_states: true
+      fsdp_forward_prefetch: false
+      fsdp_cpu_ram_efficient_loading: true
+    gpu_ids: all
+    machine_rank: 0
+    main_training_function: main
+    mixed_precision: bf16
+    num_machines: 1
+    num_processes: 4
+    rdzv_backend: static
+    same_network: true
+    use_cpu: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: training-data
+  namespace: ml-training
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: fast-ssd
+  resources:
+    requests:
+      storage: 200Gi  # Increased for model weights cache
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: training-output
+  namespace: ml-training
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: fast-ssd
+  resources:
+    requests:
+      storage: 100Gi

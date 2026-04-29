@@ -1,0 +1,146 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ml-training
+
+resources:
+  - ../../base/ray
+  - ../../base/kueue
+
+# =============================================================================
+# TinyLlama-1.1B - Benchmark Configuration (1B-04)
+# =============================================================================
+# Model: TinyLlama/TinyLlama-1.1B-Chat-v1.0
+# GPU: 2x RTX 6000 (192GB VRAM total) - g7e.12xlarge
+# Training: LoRA + DDP
+# =============================================================================
+
+components:
+  # Container image
+  - ../../components/image
+
+  # Training configuration - LoRA (not QLoRA) per benchmark spec
+  - ../../components/training/lora
+
+  # Gang scheduling (Kueue)
+  - ../../components/scheduling/kueue
+
+  # S3 storage for checkpoints and outputs
+  - ../../components/storage/s3
+
+patches:
+  # =============================================================================
+  # Pod Configuration - 1 pod with 2 GPUs, gang scheduling
+  # =============================================================================
+  - target:
+      kind: RayJob
+      name: sft-training-ray
+    patch: |-
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/replicas
+        value: 1
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/maxReplicas
+        value: 1
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/rayStartParams/num-gpus
+        value: "2"
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/containers/0/resources/requests/nvidia.com~1gpu
+        value: "2"
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/containers/0/resources/limits/nvidia.com~1gpu
+        value: "2"
+      - op: add
+        path: /metadata/annotations/kueue.x-k8s.io~1pod-group-total-count
+        value: "2"
+
+  # =============================================================================
+  # Instance Configuration - g7e.12xlarge (2x RTX 6000 Blackwell)
+  # =============================================================================
+  - target:
+      kind: RayJob
+      name: sft-training-ray
+    patch: |-
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/containers/0/resources/requests/memory
+        value: "160Gi"
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/containers/0/resources/limits/memory
+        value: "180Gi"
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/containers/0/resources/requests/cpu
+        value: "40"
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/containers/0/resources/limits/cpu
+        value: "48"
+      - op: add
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/affinity
+        value:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: node.kubernetes.io/instance-type
+                      operator: In
+                      values: ["g7e.12xlarge"]
+
+  # =============================================================================
+  # Ray Train Worker Configuration
+  # =============================================================================
+  - target:
+      kind: ConfigMap
+      name: ray-training-config
+    patch: |-
+      - op: replace
+        path: /data/num_workers
+        value: "2"
+      - op: replace
+        path: /data/gpus_per_worker
+        value: "1"
+      - op: replace
+        path: /data/cpus_per_worker
+        value: "16"
+
+  # =============================================================================
+  # Benchmark Configuration - Fixed settings
+  # =============================================================================
+  - target:
+      kind: ConfigMap
+      name: ray-training-config
+    patch: |-
+      - op: replace
+        path: /data/model_name
+        value: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+      # Fixed settings (affect quality)
+      - op: replace
+        path: /data/lora_r
+        value: "16"
+      - op: replace
+        path: /data/lora_alpha
+        value: "32"
+      - op: replace
+        path: /data/lora_dropout
+        value: "0.05"
+      - op: replace
+        path: /data/max_seq_length
+        value: "2048"
+      - op: replace
+        path: /data/learning_rate
+        value: "2e-4"
+      - op: replace
+        path: /data/num_epochs
+        value: "1"
+      - op: replace
+        path: /data/max_samples
+        value: "1000"
+      # Variable settings (maximize throughput)
+      - op: replace
+        path: /data/batch_size
+        value: "4"
+      - op: replace
+        path: /data/gradient_accumulation_steps
+        value: "1"

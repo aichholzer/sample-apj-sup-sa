@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# Container image configuration TEMPLATE
+#
+# This file is a template. The actual kustomization.yaml is generated
+# automatically when you run: ./scripts/setup.sh build-push
+#
+# DO NOT edit kustomization.yaml directly - it will be overwritten.
+
+images:
+  - name: pytorch-training
+    newName: <ECR_REGISTRY>/pytorch-training
+    newTag: latest

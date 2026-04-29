@@ -1,0 +1,10 @@
+nameReference:
+- kind: ConfigMap
+  version: v1
+  fieldSpecs:
+  - path: spec/rayClusterSpec/headGroupSpec/template/spec/containers/env/valueFrom/configMapKeyRef/name
+    kind: RayJob
+  - path: spec/rayClusterSpec/workerGroupSpecs/template/spec/containers/env/valueFrom/configMapKeyRef/name
+    kind: RayJob
+# ServiceAccount references NOT transformed - use shared ray-training-sa
+# PVC references NOT transformed - use shared ml-data-efs PVC

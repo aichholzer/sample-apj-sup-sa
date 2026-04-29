@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# FSDP training configuration
+# Fully Sharded Data Parallel for very large models
+# Shards model across GPUs to fit models that don't fit in single GPU
+# Best for: Very large models (70B+) on multi-node setups
+# Note: Use HYBRID_SHARD strategy for multi-node (set in train_ray.py)
+
+patches:
+  - target:
+      kind: ConfigMap
+      name: ray-training-config
+    patch: |-
+      - op: replace
+        path: /data/use_qlora
+        value: "false"
+      - op: replace
+        path: /data/use_fsdp
+        value: "true"
+      - op: replace
+        path: /data/lora_r
+        value: "8"

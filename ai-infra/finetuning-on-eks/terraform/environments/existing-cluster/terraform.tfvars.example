@@ -1,0 +1,107 @@
+################################################################################
+# Terraform Variables - Existing EKS Cluster Environment
+################################################################################
+# Copy this file to terraform.tfvars and fill in your values
+# cp terraform.tfvars.example terraform.tfvars
+
+################################################################################
+# Required Variables
+################################################################################
+
+# AWS region where your existing EKS cluster is located
+# Find your cluster's region:
+#   aws eks list-clusters --region us-west-2
+region = "us-west-2"
+
+# Name of your existing EKS cluster
+# List all clusters in your region:
+#   aws eks list-clusters --region us-west-2 --query 'clusters[]' --output text
+cluster_name = "my-existing-cluster"
+
+# VPC ID where your EKS cluster is running
+# Find your cluster's VPC:
+#   aws eks describe-cluster --name my-existing-cluster --region us-west-2 --query 'cluster.resourcesVpcConfig.vpcId' --output text
+vpc_id = "vpc-0123456789abcdef0"
+
+# VPC CIDR block (needed for EFS security group rules)
+# Get your VPC CIDR:
+#   aws ec2 describe-vpcs --vpc-ids vpc-0123456789abcdef0 --query 'Vpcs[0].CidrBlock' --output text
+vpc_cidr = "10.0.0.0/16"
+
+# Private subnet IDs where Karpenter will provision GPU nodes
+# Find your cluster's private subnets:
+#   aws eks describe-cluster --name my-existing-cluster --region us-west-2 --query 'cluster.resourcesVpcConfig.subnetIds[]' --output text
+# Then check which are private:
+#   aws ec2 describe-subnets --subnet-ids subnet-xxx subnet-yyy --query 'Subnets[?MapPublicIpOnLaunch==`false`].SubnetId' --output text
+private_subnet_ids = [
+  "subnet-0123456789abcdef0",
+  "subnet-0123456789abcdef1",
+  "subnet-0123456789abcdef2"
+]
+
+# Security group IDs to attach to Karpenter nodes
+# Typically: cluster security group + node security group
+# Find your cluster security group:
+#   aws eks describe-cluster --name my-existing-cluster --region us-west-2 --query 'cluster.resourcesVpcConfig.clusterSecurityGroupId' --output text
+# Find existing node security groups (if you have existing node groups):
+#   aws eks describe-nodegroup --cluster-name my-existing-cluster --nodegroup-name <nodegroup-name> --region us-west-2 --query 'nodegroup.resources.remoteAccessSecurityGroup' --output text
+cluster_security_group_ids = [
+  "sg-0123456789abcdef0",  # Cluster security group
+  "sg-0123456789abcdef1"   # Node security group (if exists)
+]
+
+################################################################################
+# Component Toggles (Optional - defaults shown)
+################################################################################
+
+# Enable Karpenter for GPU node auto-scaling
+# Set to false if you want to manage GPU nodes manually
+enable_karpenter = true
+
+# Enable KubeRay operator for distributed training
+enable_kuberay = true
+
+# Enable Kueue for gang scheduling
+enable_kueue = true
+
+# Enable EFS for shared model cache storage
+# Set to false if you already have EFS and want to use existing_efs_file_system_id
+enable_efs = true
+
+# Enable S3 for checkpoints and model outputs
+enable_s3 = true
+
+# Enable NVIDIA GPU Operator (includes device plugin and DCGM exporter)
+# Set to false if it's already installed in your cluster
+enable_gpu_operator = true
+
+# Enable Cilium CNI (chaining mode)
+# Most existing clusters already have a CNI - leave this false unless needed
+enable_cilium = false
+
+# Enable Capacity Block NodePool for p-family instances (A100/H100)
+# Set to true if you have AWS Capacity Block reservations
+enable_capacity_block_nodepool = false
+
+################################################################################
+# Optional Overrides
+################################################################################
+
+# Use an existing EFS file system instead of creating a new one
+# Leave empty to create a new EFS
+# Find existing EFS:
+#   aws efs describe-file-systems --region us-west-2 --query 'FileSystems[].FileSystemId' --output text
+# existing_efs_file_system_id = "fs-0123456789abcdef"
+
+# GPU instance categories for Karpenter
+# "g" = A10G, L40S, RTX 6000 Blackwell (g5, g6e, g7e instances)
+# "p" = A100, H100 (p4d, p5 instances - requires Capacity Blocks)
+gpu_instance_categories = ["g"]
+
+# Tags to match Capacity Block reservations (only if enable_capacity_block_nodepool = true)
+# Your Capacity Block reservations must have these tags
+# List your Capacity Block reservations:
+#   aws ec2 describe-capacity-reservations --region us-west-2 --filters "Name=state,Values=active" --query 'CapacityReservations[].{ID:CapacityReservationId,Type:InstanceType,Tags:Tags}' --output table
+capacity_block_tags = {
+  purpose = "ml-training"
+}

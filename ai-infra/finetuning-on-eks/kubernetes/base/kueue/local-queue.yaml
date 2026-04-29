@@ -1,0 +1,13 @@
+################################################################################
+# Kueue LocalQueue
+################################################################################
+# Namespace-scoped queue that points to the ClusterQueue
+# RayJobs reference this queue via kueue.x-k8s.io/queue-name label
+################################################################################
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: LocalQueue
+metadata:
+  name: ml-training-local
+  namespace: ml-training
+spec:
+  clusterQueue: ml-training-queue

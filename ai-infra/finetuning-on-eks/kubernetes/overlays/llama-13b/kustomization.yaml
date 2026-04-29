@@ -1,0 +1,130 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ml-training
+
+resources:
+  - ../../base/ray
+  - ../../base/kueue
+
+# =============================================================================
+# Llama-2 13B - Optimal Configuration
+# =============================================================================
+# Model: meta-llama/Llama-2-13b-hf (requires HuggingFace token)
+# GPU: 4x A10G (96GB VRAM total) - g5.12xlarge
+# Training: LoRA with DDP (Distributed Data Parallel)
+# =============================================================================
+
+components:
+  # Container image
+  - ../../components/image
+
+  # Training configuration
+  - ../../components/training/lora
+
+  # Gang scheduling (Kueue)
+  - ../../components/scheduling/kueue
+
+  # S3 storage for checkpoints and outputs
+  - ../../components/storage/s3
+
+  # Settings: uncomment ONE to customize training duration
+  # - ../../components/settings/quick-test      # 100 samples, 1 epoch
+  # - ../../components/settings/full-training   # Full dataset, 3 epochs
+
+patches:
+  # =============================================================================
+  # Pod Configuration - 1 pod with 4 GPUs, gang scheduling
+  # =============================================================================
+  - target:
+      kind: RayJob
+      name: sft-training-ray
+    patch: |-
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/replicas
+        value: 1
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/maxReplicas
+        value: 1
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/rayStartParams/num-gpus
+        value: "4"
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/containers/0/resources/requests/nvidia.com~1gpu
+        value: "4"
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/containers/0/resources/limits/nvidia.com~1gpu
+        value: "4"
+      - op: add
+        path: /metadata/annotations/kueue.x-k8s.io~1pod-group-total-count
+        value: "2"
+
+  # =============================================================================
+  # Instance Configuration - g5.12xlarge (4x A10G)
+  # =============================================================================
+  - target:
+      kind: RayJob
+      name: sft-training-ray
+    patch: |-
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/containers/0/resources/requests/memory
+        value: "160Gi"
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/containers/0/resources/limits/memory
+        value: "180Gi"
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/containers/0/resources/requests/cpu
+        value: "40"
+      - op: replace
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/containers/0/resources/limits/cpu
+        value: "48"
+      - op: add
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/affinity
+        value:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: node.kubernetes.io/instance-type
+                      operator: In
+                      values: ["g5.12xlarge"]
+
+  # =============================================================================
+  # Ray Train Worker Configuration
+  # =============================================================================
+  - target:
+      kind: ConfigMap
+      name: ray-training-config
+    patch: |-
+      - op: replace
+        path: /data/num_workers
+        value: "4"
+      - op: replace
+        path: /data/gpus_per_worker
+        value: "1"
+      - op: replace
+        path: /data/cpus_per_worker
+        value: "10"
+
+  # =============================================================================
+  # Model Configuration
+  # =============================================================================
+  - target:
+      kind: ConfigMap
+      name: ray-training-config
+    patch: |-
+      - op: replace
+        path: /data/model_name
+        value: "meta-llama/Llama-2-13b-hf"
+      - op: replace
+        path: /data/max_seq_length
+        value: "2048"
+      - op: replace
+        path: /data/batch_size
+        value: "1"
+      - op: replace
+        path: /data/gradient_accumulation_steps
+        value: "16"

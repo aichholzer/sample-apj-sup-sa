@@ -1,0 +1,49 @@
+################################################################################
+# Kueue ClusterQueue
+################################################################################
+# Defines resource quotas for workload admission.
+# - cpu-default: For Ray head nodes (no GPU)
+# - gpu-spot-flexible: For GPU workers (no instance constraints)
+#
+# Instance type selection is handled by overlay nodeAffinity, not by Kueue
+# flavors. gpu-spot-flexible has no nodeLabels, so it doesn't conflict with
+# any overlay's instance selection. Karpenter provisions the actual nodes.
+################################################################################
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ClusterQueue
+metadata:
+  name: ml-training-queue
+spec:
+  # Preemption policy - lower priority jobs can be preempted
+  preemption:
+    withinClusterQueue: LowerPriority
+    reclaimWithinCohort: Any
+
+  # Namespace selector - only admit workloads from ml-training namespace
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: ml-training
+
+  # Resource groups - all resources in single group to avoid duplicates
+  resourceGroups:
+    - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
+      flavors:
+        # cpu-default: For Ray head nodes (no GPU, just coordination)
+        - name: cpu-default
+          resources:
+            - name: "cpu"
+              nominalQuota: 4
+            - name: "memory"
+              nominalQuota: 8Gi
+            - name: "nvidia.com/gpu"
+              nominalQuota: 0
+
+        # gpu-spot-flexible: Any GPU instance (for Spot availability)
+        - name: gpu-spot-flexible
+          resources:
+            - name: "cpu"
+              nominalQuota: 400
+            - name: "memory"
+              nominalQuota: 4000Gi
+            - name: "nvidia.com/gpu"
+              nominalQuota: 20

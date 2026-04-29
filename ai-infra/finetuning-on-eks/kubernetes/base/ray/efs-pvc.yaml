@@ -1,0 +1,25 @@
+################################################################################
+# EFS PersistentVolumeClaim for Shared ML Data
+################################################################################
+# Provides ReadWriteMany storage for multi-node training
+# - Shared HuggingFace model cache (download once, use everywhere)
+# - Shared dataset storage
+# - Local fallback for outputs if S3 not configured
+#
+# Note: Ray checkpoints and model outputs use S3 when configured (see s3-config.yaml)
+################################################################################
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ml-data-efs
+  namespace: ml-training
+  labels:
+    app: ray-training
+    storage: efs
+spec:
+  accessModes:
+    - ReadWriteMany  # Required for multi-node access
+  storageClassName: efs-sc
+  resources:
+    requests:
+      storage: 500Gi

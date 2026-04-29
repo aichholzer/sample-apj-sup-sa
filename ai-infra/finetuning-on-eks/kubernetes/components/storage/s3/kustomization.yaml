@@ -1,0 +1,41 @@
+################################################################################
+# S3 Storage Component
+################################################################################
+# Patches ServiceAccount and ConfigMap with actual S3 bucket and IRSA role
+# from Terraform outputs.
+#
+# Usage:
+#   1. Run: ./scripts/setup.sh configure-s3
+#   2. This updates the placeholder values below with Terraform outputs
+#
+# The configure-s3 command reads:
+#   - s3_training_role_arn -> patches ServiceAccount annotation
+#   - s3_bucket_name -> patches ConfigMap bucket_name and paths
+################################################################################
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# Patch ServiceAccount with IRSA role ARN
+patches:
+  - target:
+      kind: ServiceAccount
+      name: ray-training-sa
+    patch: |-
+      - op: replace
+        path: /metadata/annotations/eks.amazonaws.com~1role-arn
+        value: "PLACEHOLDER_ROLE_ARN"
+
+  # Patch S3 ConfigMap with bucket name and paths
+  - target:
+      kind: ConfigMap
+      name: s3-config
+    patch: |-
+      - op: replace
+        path: /data/bucket_name
+        value: "PLACEHOLDER_BUCKET"
+      - op: replace
+        path: /data/ray_storage_path
+        value: "s3://PLACEHOLDER_BUCKET/ray"
+      - op: replace
+        path: /data/output_path
+        value: "s3://PLACEHOLDER_BUCKET/outputs"

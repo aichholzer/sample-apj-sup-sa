@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# Full training settings
+# Use complete dataset for production training runs
+# Recommended for: Final model training
+
+patches:
+  - target:
+      kind: ConfigMap
+      name: ray-training-config
+    patch: |-
+      - op: replace
+        path: /data/max_samples
+        value: "0"
+      - op: replace
+        path: /data/num_epochs
+        value: "3"
+
+  # Larger storage for full training (EFS for HuggingFace cache only, outputs go to S3)
+  - target:
+      kind: PersistentVolumeClaim
+      name: ml-data-efs
+    patch: |-
+      - op: replace
+        path: /spec/resources/requests/storage
+        value: "500Gi"

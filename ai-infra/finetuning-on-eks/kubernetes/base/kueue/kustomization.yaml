@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Kueue base resources for gang scheduling
+# - ResourceFlavors: Map to Karpenter node labels
+# - ClusterQueue: Resource quotas matching Karpenter limits
+# - LocalQueue: Namespace queue for ml-training
+
+resources:
+  - resource-flavors.yaml
+  - cluster-queue.yaml
+  - local-queue.yaml

@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# LoRA training configuration
+# Full precision base model + LoRA adapters
+# Compatible with DDP for multi-node training
+# Best for: Multi-GPU or multi-node setups
+
+patches:
+  - target:
+      kind: ConfigMap
+      name: ray-training-config
+    patch: |-
+      - op: replace
+        path: /data/use_qlora
+        value: "false"
+      - op: replace
+        path: /data/use_fsdp
+        value: "false"
+      - op: replace
+        path: /data/lora_r
+        value: "16"

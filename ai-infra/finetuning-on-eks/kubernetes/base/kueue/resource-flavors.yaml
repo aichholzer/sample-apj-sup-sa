@@ -1,0 +1,27 @@
+################################################################################
+# Kueue ResourceFlavors
+################################################################################
+# ResourceFlavors define node selection constraints for workloads.
+# Only two flavors are needed:
+# - cpu-default: For Ray head nodes (no GPU)
+# - gpu-spot-flexible: For GPU workers (no instance constraints)
+#
+# Instance type selection is handled entirely by overlay nodeAffinity patches,
+# not by Kueue flavors. This keeps Kueue's role simple (quota/gang scheduling)
+# and avoids duplicating instance selection logic.
+################################################################################
+---
+# gpu-spot-flexible - No instance type constraint (enables Spot flexibility)
+# Karpenter picks the cheapest instance that fits the pod's resource requests
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ResourceFlavor
+metadata:
+  name: gpu-spot-flexible
+spec: {}
+---
+# CPU default - For Ray head nodes (no GPU)
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ResourceFlavor
+metadata:
+  name: cpu-default
+spec: {}

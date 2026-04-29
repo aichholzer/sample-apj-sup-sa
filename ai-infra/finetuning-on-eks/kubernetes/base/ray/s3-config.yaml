@@ -1,0 +1,31 @@
+################################################################################
+# S3 Configuration for Ray Training
+################################################################################
+# Configures S3 paths for Ray checkpoints and model outputs.
+#
+# Placeholders are patched by components/storage/s3 with actual values
+# from Terraform outputs.
+################################################################################
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: s3-config
+  namespace: ml-training
+  labels:
+    app: ray-training
+    app.kubernetes.io/part-of: fine-tuning-on-eks
+data:
+  # S3 bucket name (set by configure-s3 command)
+  bucket_name: "PLACEHOLDER_BUCKET"
+
+  # Ray storage path for checkpoints
+  ray_storage_path: "s3://PLACEHOLDER_BUCKET/ray"
+
+  # Model output path
+  output_path: "s3://PLACEHOLDER_BUCKET/outputs"
+
+  # Checkpoint frequency (steps between checkpoints)
+  checkpoint_frequency: "500"
+
+  # Number of checkpoints to keep (older ones are deleted)
+  num_checkpoints_to_keep: "2"

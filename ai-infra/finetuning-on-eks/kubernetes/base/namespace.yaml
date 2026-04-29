@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ml-training
+  labels:
+    app.kubernetes.io/name: ml-training
+    app.kubernetes.io/part-of: fine-tuning-on-eks
