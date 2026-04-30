@@ -4,7 +4,7 @@
 
 AWS Workshop Studio deployable and reference sample for agentic AI self-service analytics on multi-tenant SaaS. Business users ask questions in natural language; a Strands agent selects tools via MCP Gateway, queries Aurora PostgreSQL, and returns formatted insights.
 
-**Scenario:** Timely-Unicorn — multi-tenant SaaS for unicorn rental businesses. Three tenant accounts with ~14,000 bookings, 500 customers, 100 unicorns.
+**Scenario:** Timely-Unicorn — multi-tenant SaaS for unicorn rental businesses. Two tenants (Mythical Unicorns, Mythic Unicorns) plus the platform account.
 
 ## Deployment
 
