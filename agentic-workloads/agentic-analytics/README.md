@@ -86,8 +86,7 @@ The workshop uses CloudFormation to pre-provision infrastructure (Aurora, Glue, 
 │   │   ├── tools/               # Lambda toolsets (prebaked SQL, API, custom SQL, semantic layer)
 │   │   ├── infra/               # Gateway, toolset, and observability deployment
 │   │   ├── policy/              # Cedar policy deployment and pre-token Lambda
-│   │   ├── guardrails/          # Bedrock Guardrail deployment
-│   │   └── evaluation/          # Strands Evals test cases and runner
+│   │   └── guardrails/          # Bedrock Guardrail deployment
 │   └── ui/                      # React frontend
 ├── infrastructure/
 │   ├── stacks/                  # CloudFormation templates (nested stacks)

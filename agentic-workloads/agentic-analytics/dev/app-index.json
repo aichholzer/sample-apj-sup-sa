@@ -20,7 +20,6 @@
     "app/agentcore_strands/policy/": "Cedar policy deployment and pre-token Lambda",
     "app/agentcore_strands/guardrails/": "Bedrock Guardrail deployment",
     "app/agentcore_strands/ui/": "Amplify hosting deployment",
-    "app/agentcore_strands/evaluation/": "Strands Evals test cases, ground truth generation, and evaluation runner",
     "app/agentcore_strands/lambda_tests/": "Property-based tests for Lambda tools",
     "app/ui/": "React frontend application",
     "exercises/": "Learning exercises (basic_agent.py for Step 1)",
@@ -173,10 +172,6 @@
       "summary": "Deployment configuration with region, stack prefix, and customizable settings for deploy_all.sh"
     },
     {
-      "path": "infrastructure/config/deployment-config.json",
-      "summary": "Generated deployment configuration with stack outputs and resource ARNs"
-    },
-    {
       "path": "infrastructure/config/glue-catalog-metadata.json",
       "summary": "Exported Glue catalog metadata with table and column descriptions for embedding generation"
     },
@@ -231,18 +226,6 @@
     {
       "path": "exercises/basic_agent.py",
       "summary": "Learning exercise: simplified local Strands agent for Step 1"
-    },
-    {
-      "path": "app/agentcore_strands/evaluation/generate_ground_truth.py",
-      "summary": "Script to query local PostgreSQL and generate ground truth answers for evaluation (16 queries across both tenants)"
-    },
-    {
-      "path": "app/agentcore_strands/evaluation/build_experiment.py",
-      "summary": "Builds Strands Evals experiment with 108 test cases across 7 categories: prebaked_sql (48), custom_sql (10), sop_behavior (15), guardrails (15), api_integration (10), rls (5), policy (5)"
-    },
-    {
-      "path": "app/agentcore_strands/evaluation/run_evaluation.py",
-      "summary": "Runs Strands Evals against deployed AgentCore Runtime agent via agentcore invoke CLI, per-persona Cognito auth, OutputEvaluator with category-specific rubrics, reports % accuracy per category"
     },
     {
       "path": "dataset/validation/ground_truth.json",

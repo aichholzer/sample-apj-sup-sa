@@ -16,6 +16,7 @@ __pycache__/
 *.zip
 app/agentcore_strands/gateway_config.json
 app/agentcore_strands/Dockerfile
+infrastructure/config/deployment-config.json
 
 # Environment files (contain credentials)
 .env
