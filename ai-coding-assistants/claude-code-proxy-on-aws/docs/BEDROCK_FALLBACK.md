@@ -58,11 +58,15 @@ the admin model catalog schemas.
 
 ## Circuit breaker
 
-`circuit_breaker.py` implements a per-region, in-memory circuit breaker so that once
-Bedrock is known to be down, subsequent requests skip Bedrock entirely and go straight to
-1P, instead of paying the failure latency on every request.
+`circuit_breaker.py` implements an in-memory circuit breaker keyed per (Bedrock region,
+model) so that once a given model in a region is known to be down, subsequent requests for
+that same region+model skip Bedrock entirely and go straight to 1P, instead of paying the
+failure latency on every request. Keying by model as well as region keeps one model's outage
+or throttle (for example hitting its TPM/RPM quota) from diverting unrelated models in the
+same region; a true region-wide outage still trips every model independently as each one
+fails.
 
-State machine, per Bedrock region:
+State machine, per (region, model) key:
 
 ```
 CLOSED  -- record_failure --> OPEN
@@ -71,8 +75,8 @@ HALF    -- record_success  --> CLOSED
 HALF    -- record_failure  --> OPEN   (timer reset)
 ```
 
-- `allow_bedrock(region)` returns whether the next request for that region should hit
-  Bedrock. When the open window has elapsed it transitions `OPEN -> HALF` and lets the
+- `allow_bedrock(key)` returns whether the next request for that (region, model) key should
+  hit Bedrock. When the open window has elapsed it transitions `OPEN -> HALF` and lets the
   caller act as the probe.
 - `record_failure` is called only for provider-outage and throttle failures, never for
   client-bug failures (the Bedrock service itself is healthy in that case).
@@ -90,8 +94,9 @@ state.
 `GatewayService.process_message`:
 
 1. Run the policy chain and resolve the model.
-2. If the breaker is open for the model's region and the model is fallback-eligible, skip
-   Bedrock and call 1P (`_call_anthropic_fallback`, reason `circuit_open`).
+2. If the breaker is open for the model's (region, model) key and the model is
+   fallback-eligible, skip Bedrock and call 1P (`_call_anthropic_fallback`, reason
+   `circuit_open`).
 3. Otherwise convert the request and call `bedrock_client.converse`.
    - On `BedrockError` / `BedrockThrottlingError`: record a breaker failure, and if the
      model is fallback-eligible, call 1P (reason = the Bedrock error type). If not

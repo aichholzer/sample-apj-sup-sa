@@ -49,6 +49,11 @@ def _build_resolved_model(anthropic_id: str | None) -> SimpleNamespace:
     )
 
 
+# Circuit-breaker key the service derives for the model built above:
+# "{bedrock_region}|{bedrock_model_id}".
+_BREAKER_KEY = "ap-northeast-2|anthropic.claude-sonnet-4-6"
+
+
 def _evaluate_with_resolved(resolved):
     async def _evaluate(context):
         context.user = SimpleNamespace(id="user-123")
@@ -134,6 +139,37 @@ async def test_bedrock_failure_falls_back_to_anthropic_when_configured() -> None
     # 1P fallback usage is intentionally not recorded: cost is tracked on the
     # Anthropic console, and the gateway only meters Bedrock spend.
     usage_service.record_success.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fallback_lifts_inline_system_messages_to_top_level() -> None:
+    """1P fallback payload must move system-role messages to top-level system.
+
+    Mirrors the Bedrock converter normalization so the fallback shape is valid
+    for the Anthropic Messages API (which rejects system roles inside messages).
+    """
+    anthropic_client = SimpleNamespace(messages=AsyncMock(return_value=_anthropic_response()))
+    service, _ = _make_service(
+        bedrock_side_effect=BedrockError("bedrock down"),
+        anthropic_client=anthropic_client,
+        resolved_model=_build_resolved_model("claude-sonnet-4-5-20250929"),
+    )
+    request = MessageRequest(
+        model="claude-sonnet-4-6",
+        max_tokens=128,
+        system="base",
+        messages=[
+            {"role": "user", "content": "Hi"},
+            {"role": "system", "content": "skill context"},
+        ],
+    )
+
+    await service.process_message(request, "sk-test", "req-system-lift")
+
+    body, _ = anthropic_client.messages.await_args.args
+    assert all(m["role"] != "system" for m in body["messages"])
+    assert {"type": "text", "text": "base"} in body["system"]
+    assert {"type": "text", "text": "skill context"} in body["system"]
 
 
 @pytest.mark.asyncio
@@ -288,7 +324,7 @@ async def test_breaker_does_not_trip_on_client_bug_error() -> None:
     with pytest.raises(BedrockClientBugError):
         await service.process_message(_build_request(), "sk-test", "req-bug")
 
-    assert breaker.state("ap-northeast-2") == BreakerState.CLOSED
+    assert breaker.state(_BREAKER_KEY) == BreakerState.CLOSED
     anthropic_client.messages.assert_not_awaited()
 
 
@@ -299,7 +335,7 @@ async def test_breaker_recovers_to_closed_on_bedrock_success() -> None:
     breaker = CircuitBreaker(open_seconds=300.0)
     monotonic_values = iter([0.0, 400.0])
     breaker._now = lambda: next(monotonic_values)  # type: ignore[method-assign]
-    breaker.record_failure("ap-northeast-2")
+    breaker.record_failure(_BREAKER_KEY)
 
     anthropic_client = SimpleNamespace(messages=AsyncMock(return_value=_anthropic_response()))
     response_converter = SimpleNamespace(
@@ -321,7 +357,45 @@ async def test_breaker_recovers_to_closed_on_bedrock_success() -> None:
     response = await service.process_message(_build_request(), "sk-test", "req-probe")
 
     assert response.id == "from-bedrock"
-    assert breaker.state("ap-northeast-2") == BreakerState.CLOSED
+    assert breaker.state(_BREAKER_KEY) == BreakerState.CLOSED
+    bedrock_client.converse.assert_awaited_once()
+    anthropic_client.messages.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_breaker_open_for_one_model_does_not_divert_another() -> None:
+    """An open breaker for model A must not route model B in the same region.
+
+    Breaker keys are (region, model), so an Opus outage in ap-northeast-2 leaves
+    Sonnet requests in the same region hitting Bedrock normally.
+    """
+    from gateway.domains.runtime.circuit_breaker import CircuitBreaker
+
+    breaker = CircuitBreaker(open_seconds=300.0)
+    # Open the breaker for a different model in the same region.
+    breaker.record_failure("ap-northeast-2|anthropic.claude-opus-4-6")
+
+    anthropic_client = SimpleNamespace(messages=AsyncMock(return_value=_anthropic_response()))
+    response_converter = SimpleNamespace(
+        convert_response=Mock(return_value=SimpleNamespace(id="from-bedrock")),
+        extract_usage=Mock(return_value=UsageInfo()),
+    )
+    bedrock_client = SimpleNamespace(
+        converse=AsyncMock(return_value={"output": {}, "usage": {}})
+    )
+    # Resolved model is Sonnet (the model built by _build_resolved_model).
+    service, _ = _make_service(
+        bedrock_side_effect=None,
+        anthropic_client=anthropic_client,
+        resolved_model=_build_resolved_model("claude-sonnet-4-5-20250929"),
+        response_converter=response_converter,
+        circuit_breaker=breaker,
+        bedrock_client=bedrock_client,
+    )
+
+    response = await service.process_message(_build_request(), "sk-test", "req-other-model")
+
+    assert response.id == "from-bedrock"
     bedrock_client.converse.assert_awaited_once()
     anthropic_client.messages.assert_not_awaited()
 
@@ -427,7 +501,7 @@ async def test_stream_breaker_open_skips_bedrock_stream() -> None:
     from gateway.domains.runtime.circuit_breaker import CircuitBreaker
 
     breaker = CircuitBreaker(open_seconds=300.0)
-    breaker.record_failure("ap-northeast-2")
+    breaker.record_failure(_BREAKER_KEY)
     anthropic_client = SimpleNamespace(
         messages_stream=AsyncMock(return_value=_async_chunks(_sse_stream_chunks()))
     )

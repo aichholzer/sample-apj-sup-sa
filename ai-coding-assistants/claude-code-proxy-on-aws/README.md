@@ -268,9 +268,11 @@ aws secretsmanager put-secret-value \
 
 The gateway accepts either a JSON envelope (`{"api_key":"..."}`) or a raw key string. The value is read on first fallback request and cached in memory; the running ECS task does not need a restart for the key to take effect.
 
-To enable fallback for a model, set `anthropic_model_id` when registering the model in Step 3 below (e.g. `"anthropic_model_id": "claude-sonnet-4-5-20250929"`). Models without `anthropic_model_id` skip fallback even when Bedrock fails.
+To enable fallback for a model, set `anthropic_model_id` when registering the model in Step 3 below (e.g. `"anthropic_model_id": "claude-sonnet-4-6"`). Models without `anthropic_model_id` skip fallback even when Bedrock fails.
 
-Fallback covers both non-streaming and streaming requests. A per-region in-memory circuit breaker trips on Bedrock provider/throttle failures and routes subsequent requests straight to 1P until it half-opens (default `BEDROCK_BREAKER_OPEN_SECONDS=300`) and a probe succeeds, after which traffic returns to Bedrock automatically. For streaming, fallback only applies while the stream has not started yet (the `ConverseStream` call fails before the first chunk, or the breaker is already open); once SSE bytes have been sent to the client, a mid-stream Bedrock disconnect cannot fall over to 1P and must be retried by the client. Request-shape, auth, and policy rejections (`ValidationException`, `AccessDeniedException`, ...) do not trigger fallback because the same payload would fail at 1P too.
+Fallback covers both non-streaming and streaming requests. An in-memory circuit breaker, keyed per (Bedrock region, model), trips on Bedrock provider/throttle failures and routes subsequent requests for that same region+model straight to 1P until it half-opens (default `BEDROCK_BREAKER_OPEN_SECONDS=300`) and a probe succeeds, after which traffic returns to Bedrock automatically. Keying by model as well as region keeps one model's outage or throttle (for example hitting its TPM/RPM quota) from diverting unrelated models in the same region. For streaming, fallback only applies while the stream has not started yet (the `ConverseStream` call fails before the first chunk, or the breaker is already open); once SSE bytes have been sent to the client, a mid-stream Bedrock disconnect cannot fall over to 1P and must be retried by the client. Request-shape, auth, and policy rejections (`ValidationException`, `AccessDeniedException`, ...) do not trigger fallback because the same payload would fail at 1P too.
+
+Usage and budget tracking covers Bedrock spend only. When a request is served by 1P fallback, its cost and token usage are recorded on the Anthropic console, not in this gateway, so they are not metered and do not decrement any user/team/model budget. As a result, while a breaker is open, requests served by 1P are not subject to the gateway's budget hard limits — 1P spend is governed by the Anthropic account, not by this gateway.
 
 ### 2. Sync Identity Center Users
 
@@ -293,6 +295,7 @@ curl -s -X POST "$API_URL/v1/admin/models" "${SIGV4_OPTS[@]}" \
   -d '{
     "canonical_name": "claude-sonnet-4-6",
     "bedrock_model_id": "global.anthropic.claude-sonnet-4-6",
+    "anthropic_model_id": "claude-sonnet-4-6",
     "bedrock_region": "ap-northeast-2",
     "provider": "anthropic",
     "family": "claude-sonnet-4-6",
@@ -304,6 +307,7 @@ curl -s -X POST "$API_URL/v1/admin/models" "${SIGV4_OPTS[@]}" \
   -d '{
     "canonical_name": "claude-opus-4-6",
     "bedrock_model_id": "global.anthropic.claude-opus-4-6-v1",
+    "anthropic_model_id": "claude-opus-4-6",
     "bedrock_region": "ap-northeast-2",
     "provider": "anthropic",
     "family": "claude-opus-4-6",
@@ -315,6 +319,7 @@ curl -s -X POST "$API_URL/v1/admin/models" "${SIGV4_OPTS[@]}" \
   -d '{
     "canonical_name": "claude-haiku-4-5",
     "bedrock_model_id": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "anthropic_model_id": "claude-haiku-4-5",
     "bedrock_region": "ap-northeast-2",
     "provider": "anthropic",
     "family": "claude-haiku-4-5"
