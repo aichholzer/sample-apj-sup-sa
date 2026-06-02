@@ -119,7 +119,7 @@ Two services start in order:
 │  ├─ Waits for PostgreSQL connection (up to 60s)         │
 │  ├─ Runs local-bootstrap.py (seed data insertion)       │
 │  │   ├─ User: local-user                               │
-│  │   ├─ Models: claude-opus-4-6 / sonnet-4-6 / haiku-4-5│
+│  │   ├─ Models: claude-opus-4-8 / sonnet-4-6 / haiku-4-5│
 │  │   ├─ Alias mappings: per-model patterns + * → sonnet │
 │  │   │   fallback                                       │
 │  │   ├─ Default prompt caching: 5m                      │
@@ -209,7 +209,7 @@ curl -s http://localhost:8000/v1/models \
 | Auth | SigV4 → IAM → SSO user lookup | local helper → `/v1/auth/token` (`local-user` principal) |
 | KMS | AWS KMS encrypt/decrypt | Local reversible fallback only when `ENVIRONMENT=local` + `KMS_KEY_ID=local-dev-placeholder` |
 | DB Migration | Alembic (ECS init container) | Alembic `upgrade head` followed by `Base.metadata.create_all` in bootstrap |
-| Model Routing | Per-model alias mapping | `claude-opus-4-6*`, `claude-sonnet-4-6*`, `claude-haiku-4-5*`, `*` → Sonnet 4.6 fallback |
+| Model Routing | Per-model alias mapping | `claude-opus-4-8*`, `claude-sonnet-4-6*`, `claude-haiku-4-5*`, `*` → Sonnet 4.6 fallback |
 | Observability | ADOT sidecar → Amazon Managed Prometheus | Disabled by default, optionally start local OTel/Prometheus/Grafana via override compose |
 | AWS Credentials | ECS Task IAM Role | Host `~/.aws` mounted read-only, then copied to container writable home |
 
@@ -302,15 +302,15 @@ curl -s -X POST "$API_URL/v1/admin/models" "${SIGV4_OPTS[@]}" \
     "supports_prompt_cache": true
   }' | python3 -m json.tool
 
-# Claude Opus 4.6
+# Claude Opus 4.8
 curl -s -X POST "$API_URL/v1/admin/models" "${SIGV4_OPTS[@]}" \
   -d '{
-    "canonical_name": "claude-opus-4-6",
-    "bedrock_model_id": "global.anthropic.claude-opus-4-6-v1",
-    "anthropic_model_id": "claude-opus-4-6",
+    "canonical_name": "claude-opus-4-8",
+    "bedrock_model_id": "global.anthropic.claude-opus-4-8",
+    "anthropic_model_id": "claude-opus-4-8",
     "bedrock_region": "ap-northeast-2",
     "provider": "anthropic",
-    "family": "claude-opus-4-6",
+    "family": "claude-opus-4-8",
     "supports_prompt_cache": true
   }' | python3 -m json.tool
 
@@ -349,7 +349,7 @@ curl -s -X POST "$API_URL/v1/admin/model-pricing" "${SIGV4_OPTS[@]}" \
     \"effective_from\": \"2025-01-01T00:00:00Z\"
   }" | python3 -m json.tool
 
-# Claude Opus 4.6 pricing
+# Claude Opus 4.8 pricing
 curl -s -X POST "$API_URL/v1/admin/model-pricing" "${SIGV4_OPTS[@]}" \
   -d "{
     \"model_id\": \"$OPUS_ID\",
@@ -383,9 +383,9 @@ Map the model name patterns requested by Claude Code to the registered models.
 curl -s -X POST "$API_URL/v1/admin/model-mappings" "${SIGV4_OPTS[@]}" \
   -d "{\"selected_model_pattern\": \"claude-sonnet-4-6*\", \"target_model_id\": \"$SONNET_ID\", \"priority\": 30, \"is_fallback\": false}" | python3 -m json.tool
 
-# claude-opus-4-6* → Opus 4.6
+# claude-opus-4-8* → Opus 4.8
 curl -s -X POST "$API_URL/v1/admin/model-mappings" "${SIGV4_OPTS[@]}" \
-  -d "{\"selected_model_pattern\": \"claude-opus-4-6*\", \"target_model_id\": \"$OPUS_ID\", \"priority\": 20, \"is_fallback\": false}" | python3 -m json.tool
+  -d "{\"selected_model_pattern\": \"claude-opus-4-8*\", \"target_model_id\": \"$OPUS_ID\", \"priority\": 20, \"is_fallback\": false}" | python3 -m json.tool
 
 # claude-haiku-4-5* → Haiku 4.5
 curl -s -X POST "$API_URL/v1/admin/model-mappings" "${SIGV4_OPTS[@]}" \
@@ -421,6 +421,26 @@ Configure Claude Code settings by referring to `scripts/settings.json`.
   - `AWS_REGION`: AWS region set in Step 0
 
 On first run, the helper automatically issues a virtual API key via SigV4 authentication.
+
+> **Required IAM permission (do not skip):** The SigV4 call to `POST /v1/auth/token` is protected by API Gateway IAM authorization, so the caller's IAM principal (the SSO permission set used by `AWS_PROFILE`) **must** be granted `execute-api:Invoke` on the token route. Without it the helper fails with `not authorized to perform: execute-api:Invoke`. Add an inline policy to the user's permission set:
+>
+> ```json
+> {
+>   "Version": "2012-10-17",
+>   "Statement": [
+>     {
+>       "Sid": "InvokeTokenApi",
+>       "Effect": "Allow",
+>       "Action": "execute-api:Invoke",
+>       "Resource": "arn:aws:execute-api:<AWS_REGION>:<ACCOUNT_ID>:<API_GW_ID>/prod/POST/v1/auth/token"
+>     }
+>   ]
+> }
+> ```
+>
+> After editing the permission set, re-provision it to the account and re-run `aws sso login` so the new permission takes effect. Admins calling the Step 2–5 Admin APIs (`/v1/admin/*`) likewise need `execute-api:Invoke` on those routes (or admin credentials that already allow it).
+>
+> **On redeploy:** `<API_GW_ID>` changes when the service stack is recreated (for example after `destroy`). Update this policy's `Resource` (and `API_GW_ID` in Step 0 / helper env) with the new ID, otherwise token issuance breaks with a stale-ARN denial.
 
 #### Virtual Key TTL
 

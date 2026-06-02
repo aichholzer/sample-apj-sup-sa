@@ -75,12 +75,12 @@ LOCAL_MODEL_SEEDS = (
     LocalModelSeed(
         id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
         pricing_id=uuid.UUID("44444444-4444-4444-4444-444444444444"),
-        canonical_name="claude-opus-4-6",
-        anthropic_model_id="claude-opus-4-6",
-        bedrock_model_id="global.anthropic.claude-opus-4-6-v1",
+        canonical_name="claude-opus-4-8",
+        anthropic_model_id="claude-opus-4-8",
+        bedrock_model_id="global.anthropic.claude-opus-4-8",
         bedrock_region=LOCAL_BEDROCK_REGION,
         provider="anthropic",
-        family="claude-opus-4-6",
+        family="claude-opus-4-8",
         supports_streaming=True,
         supports_tools=True,
         supports_prompt_cache=True,
@@ -164,8 +164,8 @@ LOCAL_MODEL_SEEDS = (
 LOCAL_MAPPING_SEEDS = (
     LocalMappingSeed(
         id=uuid.UUID("33333333-3333-3333-3333-333333333333"),
-        pattern="claude-opus-4-6*",
-        target_canonical_name="claude-opus-4-6",
+        pattern="claude-opus-4-8*",
+        target_canonical_name="claude-opus-4-8",
         priority=400,
     ),
     LocalMappingSeed(
