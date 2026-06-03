@@ -4,6 +4,36 @@ Description: |
   Deploys: ECR repo, IAM roles, DynamoDB quota table, Cognito user pool,
   ECS Fargate + ALB, AWS Budgets cap with Lambda kill-switch, and WAF web ACL.
 
+Mappings:
+  CloudFrontPrefixList:
+    us-east-1:      { PrefixListId: pl-3b927c52 }
+    us-east-2:      { PrefixListId: pl-b6a144df }
+    us-west-1:      { PrefixListId: pl-4ea04527 }
+    us-west-2:      { PrefixListId: pl-82a045eb }
+    af-south-1:     { PrefixListId: pl-e3aa449a }
+    ap-east-1:      { PrefixListId: pl-44a54e2d }
+    ap-south-1:     { PrefixListId: pl-9aa247f3 }
+    ap-south-2:     { PrefixListId: pl-6fa54806 }
+    ap-northeast-1: { PrefixListId: pl-58a04531 }
+    ap-northeast-2: { PrefixListId: pl-22a6434b }
+    ap-northeast-3: { PrefixListId: pl-31a34458 }
+    ap-southeast-1: { PrefixListId: pl-31a34458 }
+    ap-southeast-2: { PrefixListId: pl-b8a742d1 }
+    ap-southeast-3: { PrefixListId: pl-03cd2364 }
+    ca-central-1:   { PrefixListId: pl-38a64351 }
+    eu-central-1:   { PrefixListId: pl-a3a144ca }
+    eu-central-2:   { PrefixListId: pl-07ac2a60 }
+    eu-west-1:      { PrefixListId: pl-4fa04526 }
+    eu-west-2:      { PrefixListId: pl-93a247fa }
+    eu-west-3:      { PrefixListId: pl-75b1541c }
+    eu-south-1:     { PrefixListId: pl-1bbc5972 }
+    eu-south-2:     { PrefixListId: pl-0118c85e }
+    eu-north-1:     { PrefixListId: pl-fab65393 }
+    me-south-1:     { PrefixListId: pl-17b55f7e }
+    me-central-1:   { PrefixListId: pl-06bdc37f }
+    sa-east-1:      { PrefixListId: pl-5da64334 }
+    il-central-1:   { PrefixListId: pl-01d70568e8e863e53 }
+
 Parameters:
   AppName:
     Type: String
@@ -94,8 +124,6 @@ Resources:
                 Action:
                   - cognito-idp:InitiateAuth
                   - cognito-idp:RespondToAuthChallenge
-                  - cognito-idp:SignUp
-                  - cognito-idp:ConfirmSignUp
                   - cognito-idp:RevokeToken
                 Resource: !GetAtt UserPool.Arn
               - Effect: Allow
@@ -133,7 +161,7 @@ Resources:
     Properties:
       UserPoolName: !Sub ${AppName}-users
       AdminCreateUserConfig:
-        AllowAdminCreateUserOnly: false
+        AllowAdminCreateUserOnly: true
       AutoVerifiedAttributes:
         - email
       UsernameAttributes:
@@ -204,7 +232,7 @@ Resources:
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
-          SourcePrefixListId: pl-9aa247f3
+          SourcePrefixListId: !FindInMap [CloudFrontPrefixList, !Ref Region, PrefixListId]
 
   TaskSecurityGroup:
     Type: AWS::EC2::SecurityGroup

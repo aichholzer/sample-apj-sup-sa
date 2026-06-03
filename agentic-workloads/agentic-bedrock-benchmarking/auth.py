@@ -1,7 +1,6 @@
 """Cognito auth gate. Production-only; in development this is a no-op."""
 from __future__ import annotations
 
-import html
 import json
 import time
 import urllib.request
@@ -40,23 +39,6 @@ def _respond_to_challenge(challenge: str, session: str, email: str, new_password
         ChallengeName=challenge,
         Session=session,
         ChallengeResponses={"USERNAME": email, "NEW_PASSWORD": new_password},
-    )
-
-
-def _sign_up(email: str, password: str) -> None:
-    _client().sign_up(
-        ClientId=CONFIG.cognito_client_id,
-        Username=email,
-        Password=password,
-        UserAttributes=[{"Name": "email", "Value": email}],
-    )
-
-
-def _confirm_sign_up(email: str, code: str) -> None:
-    _client().confirm_sign_up(
-        ClientId=CONFIG.cognito_client_id,
-        Username=email,
-        ConfirmationCode=code,
     )
 
 
@@ -124,30 +106,6 @@ def require_login() -> AuthedUser:
 
     st.markdown("# Bedrock Model Benchmarking")
 
-    # ---- Email verification step (after sign-up) ----
-    pending_verify = st.session_state.get("pending_verify")
-    if pending_verify:
-        st.markdown("### verify your email")
-        safe_email = html.escape(pending_verify)
-        st.caption(f"a confirmation code was sent to **{safe_email}**")
-        with st.form("verify_form"):
-            code = st.text_input("confirmation code")
-            verify = st.form_submit_button("verify", type="primary")
-            back = st.form_submit_button("back")
-        if verify:
-            try:
-                _confirm_sign_up(pending_verify, code.strip())
-            except ClientError as e:
-                st.error(f"verification failed: {e.response['Error']['Message']}")
-                st.stop()
-            st.session_state.pop("pending_verify", None)
-            st.success("email verified — please sign in.")
-            st.rerun()
-        if back:
-            st.session_state.pop("pending_verify", None)
-            st.rerun()
-        st.stop()
-
     # ---- New-password challenge (admin-created users) ----
     pending = st.session_state.get("pending_challenge")
     if pending:
@@ -180,55 +138,35 @@ def require_login() -> AuthedUser:
                 st.rerun()
         st.stop()
 
-    # ---- Sign-in / Sign-up tabs ----
-    tab_in, tab_up = st.tabs(["sign in", "create account"])
-
-    with tab_in:
-        with st.form("login_form"):
-            email = st.text_input("email")
-            password = st.text_input("password", type="password")
-            submit = st.form_submit_button("sign in", type="primary")
-        if submit:
-            try:
-                resp = _initiate_auth(email, password)
-            except ClientError as e:
-                code = e.response.get("Error", {}).get("Code", "")
-                if code in ("NotAuthorizedException", "UserNotFoundException"):
-                    st.error("invalid email or password.")
-                else:
-                    st.error(f"sign-in failed: {e}")
-                st.stop()
-            except BotoCoreError as e:
+    # ---- Sign-in ----
+    with st.form("login_form"):
+        email = st.text_input("email")
+        password = st.text_input("password", type="password")
+        submit = st.form_submit_button("sign in", type="primary")
+    if submit:
+        try:
+            resp = _initiate_auth(email, password)
+        except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "")
+            if code in ("NotAuthorizedException", "UserNotFoundException"):
+                st.error("invalid email or password.")
+            else:
                 st.error(f"sign-in failed: {e}")
+            st.stop()
+        except BotoCoreError as e:
+            st.error(f"sign-in failed: {e}")
+            st.stop()
+        if resp.get("ChallengeName") == "NEW_PASSWORD_REQUIRED":
+            st.session_state.pending_challenge = {"session": resp["Session"], "email": email}
+            st.rerun()
+        else:
+            user = _complete_auth(resp.get("AuthenticationResult", {}))
+            if not user:
+                st.error("could not verify Cognito token.")
                 st.stop()
-            if resp.get("ChallengeName") == "NEW_PASSWORD_REQUIRED":
-                st.session_state.pending_challenge = {"session": resp["Session"], "email": email}
-                st.rerun()
-            else:
-                user = _complete_auth(resp.get("AuthenticationResult", {}))
-                if not user:
-                    st.error("could not verify Cognito token.")
-                    st.stop()
-                st.session_state.authed_user = user
-                st.session_state.session_started_at = time.time()
-                st.rerun()
-
-    with tab_up:
-        with st.form("signup_form"):
-            new_email = st.text_input("email")
-            new_password = st.text_input("password", type="password", help="min 12 chars, upper + lower + number + symbol")
-            confirm_password = st.text_input("confirm password", type="password")
-            register = st.form_submit_button("create account", type="primary")
-        if register:
-            if new_password != confirm_password:
-                st.error("passwords do not match.")
-            else:
-                try:
-                    _sign_up(new_email, new_password)
-                    st.session_state.pending_verify = new_email
-                    st.rerun()
-                except ClientError as e:
-                    st.error(f"sign-up failed: {e.response['Error']['Message']}")
+            st.session_state.authed_user = user
+            st.session_state.session_started_at = time.time()
+            st.rerun()
 
     st.stop()
 

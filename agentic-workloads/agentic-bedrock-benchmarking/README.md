@@ -30,7 +30,7 @@ The app starts at `http://localhost:8501`. In development mode there is no login
 
 ## Deploying to AWS
 
-The CloudFormation stack at [infra/agentic-bedrock-benchmarking.yaml](infra/agentic-bedrock-benchmarking.yaml) provisions the full production stack in one command. The deploy script at [infra/deploy.sh](infra/deploy.sh) handles ECR image build/push and stack creation automatically.
+The CloudFormation stack at [infra/agentic-bedrock-benchmarking.yaml](infra/agentic-bedrock-benchmarking.yaml) provisions the full stack in one command. The deploy script at [infra/deploy.sh](infra/deploy.sh) handles ECR image build/push and stack creation automatically.
 
 ### What gets deployed
 
